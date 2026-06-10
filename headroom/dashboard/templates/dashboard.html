@@ -1841,6 +1841,10 @@
                 get historyActiveModel() {
                     // A model filter only applies while that model is present in
                     // the charted series; otherwise fall back to showing all.
+                    // Raw checkpoint view plots no per-model lines (they are
+                    // derived from rollup buckets), so the filter must not
+                    // suppress the aggregate line there.
+                    if (this.historySelectedSeriesKey === 'history') return null;
                     const model = this.historySelectedModel;
                     if (!model) return null;
                     return this.historyModelChartSeries.some(series => series.model === model)
