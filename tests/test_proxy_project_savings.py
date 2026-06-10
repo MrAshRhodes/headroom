@@ -13,6 +13,8 @@ from headroom.proxy.project_context import (  # noqa: E402
     classify_project,
     get_current_project,
     set_current_project,
+    split_project_path,
+    with_project_prefix,
 )
 from headroom.proxy.savings_tracker import (  # noqa: E402
     DEFAULT_MAX_PROJECTS,
@@ -41,6 +43,31 @@ def test_classify_project_reads_header_case_insensitively():
     assert classify_project({"X-Headroom-Project": " frontend "}) == "frontend"
     assert classify_project({"user-agent": "claude-code/1.0"}) is None
     assert classify_project(object()) is None
+
+
+def test_split_project_path_extracts_and_strips():
+    assert split_project_path("/p/frontend/v1/messages") == ("frontend", "/v1/messages")
+    assert split_project_path("/p/my%20repo/v1/chat/completions") == (
+        "my repo",
+        "/v1/chat/completions",
+    )
+    assert split_project_path("/p/frontend") == ("frontend", "/")
+    # No prefix / unusable name: path passes through untouched.
+    assert split_project_path("/v1/messages") == (None, "/v1/messages")
+    assert split_project_path("/p//v1/messages") == (None, "/p//v1/messages")
+    assert split_project_path("/p/%20%20/v1") == (None, "/p/%20%20/v1")
+
+
+def test_with_project_prefix_round_trips_through_split():
+    url = with_project_prefix("http://127.0.0.1:8787/v1", "my repo")
+    assert url == "http://127.0.0.1:8787/p/my%20repo/v1"
+    path = url.removeprefix("http://127.0.0.1:8787")
+    assert split_project_path(path) == ("my repo", "/v1")
+
+    # Bare host (anthropic-style base) and unusable names.
+    assert with_project_prefix("http://127.0.0.1:8787", "api") == "http://127.0.0.1:8787/p/api"
+    assert with_project_prefix("http://127.0.0.1:8787/v1", "  ") == "http://127.0.0.1:8787/v1"
+    assert with_project_prefix("http://127.0.0.1:8787/v1", None) == "http://127.0.0.1:8787/v1"
 
 
 def test_project_contextvar_roundtrip():
@@ -276,5 +303,15 @@ def test_middleware_binds_project_header_to_context(tmp_path, monkeypatch):
     with TestClient(create_app(config)) as client:
         assert client.get("/health", headers={"X-Headroom-Project": " my repo "}).status_code == 200
         assert client.get("/health").status_code == 200
+        # /p/<name> base-URL prefix (aider/copilot/cursor wraps): stripped
+        # before routing, so the request still reaches /health.
+        assert client.get("/p/my%20repo/health").status_code == 200
+        # An explicit header wins over the path prefix.
+        assert (
+            client.get(
+                "/p/prefix-project/health", headers={"X-Headroom-Project": "header-project"}
+            ).status_code
+            == 200
+        )
 
-    assert captured == ["my repo", None]
+    assert captured == ["my repo", None, "my repo", "header-project"]

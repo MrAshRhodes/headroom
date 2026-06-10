@@ -80,6 +80,7 @@ from headroom.providers.openclaw import (
 from headroom.providers.openclaw import (
     normalize_gateway_provider_ids as _normalize_openclaw_gateway_provider_ids_impl,
 )
+from headroom.proxy.project_context import with_project_prefix as _with_project_prefix
 
 from .main import main
 
@@ -2711,7 +2712,11 @@ def copilot(
 
         effective_wire_api = wire_api or "completions"
         env["COPILOT_PROVIDER_TYPE"] = "openai"
-        env["COPILOT_PROVIDER_BASE_URL"] = f"http://127.0.0.1:{port}/v1"
+        # Per-project savings: the Copilot CLI cannot send custom headers, so
+        # the project rides as a /p/<name> base-URL prefix the proxy strips.
+        env["COPILOT_PROVIDER_BASE_URL"] = _with_project_prefix(
+            f"http://127.0.0.1:{port}/v1", _project_name_from_cwd()
+        )
         env["COPILOT_PROVIDER_WIRE_API"] = effective_wire_api
         env["COPILOT_PROVIDER_BEARER_TOKEN"] = client_bearer
         env["GITHUB_COPILOT_USE_TOKEN_EXCHANGE"] = "false"
@@ -2728,7 +2733,7 @@ def copilot(
         copilot_proxy_token = client_bearer
         env_vars_display = [
             "COPILOT_PROVIDER_TYPE=openai",
-            f"COPILOT_PROVIDER_BASE_URL=http://127.0.0.1:{port}/v1",
+            f"COPILOT_PROVIDER_BASE_URL={env['COPILOT_PROVIDER_BASE_URL']}",
             f"COPILOT_PROVIDER_WIRE_API={effective_wire_api}",
             (
                 "COPILOT_AUTH_MODE=github-subscription-experimental"
@@ -2755,6 +2760,7 @@ def copilot(
             provider_type=effective_provider_type,
             wire_api=wire_api,
             environ=env,
+            project=_project_name_from_cwd(),
         )
 
         if not env.get("COPILOT_PROVIDER_API_KEY"):
@@ -3094,7 +3100,9 @@ def aider(
         click.echo("Install aider: pip install aider-chat")
         raise SystemExit(1)
 
-    env, env_vars_display = _build_aider_launch_env(port, os.environ)
+    env, env_vars_display = _build_aider_launch_env(
+        port, os.environ, project=_project_name_from_cwd()
+    )
 
     _launch_tool(
         binary=aider_bin,
@@ -3177,7 +3185,7 @@ def cursor(
         return
 
     def _print_cursor_setup() -> None:
-        for line in _render_cursor_setup_lines(port):
+        for line in _render_cursor_setup_lines(port, project=_project_name_from_cwd()):
             click.echo(line)
         if not no_rtk:
             click.echo()
