@@ -36,6 +36,30 @@ def compute_hash(text: str) -> str:
     return hashlib.md5(text.encode()).hexdigest()[:16]  # nosec B324
 
 
+def _extract_tool_result_text(part: dict[str, Any]) -> str:
+    """Extract text from an Anthropic ``tool_result`` content block.
+
+    Anthropic Messages nest tool output one level deeper than OpenAI:
+    ``part["content"]`` is either a plain string or a list of content
+    blocks (``{"type": "text", "text": ...}``). Non-text inner blocks
+    (e.g. images) are skipped.
+    """
+    inner = part.get("content")
+    if inner is None:
+        return ""
+    if isinstance(inner, str):
+        return inner
+    if isinstance(inner, list):
+        pieces = []
+        for item in inner:
+            if isinstance(item, dict) and item.get("type") == "text":
+                pieces.append(item.get("text", ""))
+            elif isinstance(item, str):
+                pieces.append(item)
+        return "\n".join(pieces)
+    return str(inner)
+
+
 def detect_waste_signals(text: str, tokenizer: Tokenizer) -> WasteSignals:
     """
     Detect waste signals in text.
@@ -112,6 +136,7 @@ def parse_message_to_blocks(
     # Handle content
     content = message.get("content")
     if content:
+        tool_result_parts: list[dict[str, Any]] = []
         if isinstance(content, str):
             text = content
         elif isinstance(content, list):
@@ -120,6 +145,10 @@ def parse_message_to_blocks(
             for part in content:
                 if isinstance(part, dict) and part.get("type") == "text":
                     text_parts.append(part.get("text", ""))
+                elif isinstance(part, dict) and part.get("type") == "tool_result":
+                    # Anthropic Messages format nests tool output one level
+                    # deeper; collect for dedicated tool_result blocks below.
+                    tool_result_parts.append(part)
                 elif isinstance(part, str):
                     text_parts.append(part)
             text = "\n".join(text_parts)
@@ -159,6 +188,27 @@ def parse_message_to_blocks(
                 flags=flags,
             )
         )
+
+        for part in tool_result_parts:
+            tr_text = _extract_tool_result_text(part)
+            if not tr_text:
+                continue
+
+            tr_flags: dict[str, Any] = {"tool_call_id": part.get("tool_use_id")}
+            tr_waste = detect_waste_signals(tr_text, tokenizer)
+            if tr_waste.total() > 0:
+                tr_flags["waste_signals"] = tr_waste.to_dict()
+
+            blocks.append(
+                Block(
+                    kind="tool_result",
+                    text=tr_text,
+                    tokens_est=tokenizer.count_text(tr_text) + 4,  # Add message overhead
+                    content_hash=compute_hash(tr_text),
+                    source_index=index,
+                    flags=tr_flags,
+                )
+            )
 
     # Handle tool calls (assistant messages with tool_calls)
     tool_calls = message.get("tool_calls")
