@@ -468,6 +468,29 @@ class TestApplyProjectHeaderEnv:
         # Untouched: no duplicate header, user override wins.
         assert env["ANTHROPIC_CUSTOM_HEADERS"] == user_value
 
+    @pytest.mark.parametrize(
+        "user_value",
+        [
+            "X-Headroom-Project-Id: other",
+            "X-Trace: mentions x-headroom-project in the value",
+        ],
+    )
+    def test_similar_header_names_do_not_suppress_injection(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+        user_value: str,
+    ) -> None:
+        project_dir = tmp_path / "proj"
+        project_dir.mkdir()
+        monkeypatch.chdir(project_dir)
+
+        env = {"ANTHROPIC_CUSTOM_HEADERS": user_value}
+        wrap_mod._apply_project_header_env(env)
+
+        # Only an exact header-name match counts as a user override.
+        assert env["ANTHROPIC_CUSTOM_HEADERS"] == (f"{user_value}\nX-Headroom-Project: proj")
+
     def test_empty_cwd_name_sets_nothing(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """A degenerate cwd (e.g. filesystem root → empty basename) is a no-op."""
         monkeypatch.setattr(wrap_mod.Path, "cwd", classmethod(lambda cls: Path("/")))

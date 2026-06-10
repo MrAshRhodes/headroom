@@ -911,8 +911,10 @@ def _apply_project_header_env(env: dict[str, str]) -> None:
     header_line = f"{_PROJECT_HEADER_NAME}: {project}"
     existing = env.get("ANTHROPIC_CUSTOM_HEADERS")
     if existing:
-        if _PROJECT_HEADER_NAME.lower() in existing.lower():
-            return  # user override wins
+        for line in existing.splitlines():
+            name = line.split(":", 1)[0].strip()
+            if name.lower() == _PROJECT_HEADER_NAME.lower():
+                return  # user override wins
         env["ANTHROPIC_CUSTOM_HEADERS"] = f"{existing}\n{header_line}"
     else:
         env["ANTHROPIC_CUSTOM_HEADERS"] = header_line

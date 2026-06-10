@@ -335,6 +335,15 @@ def _normalize_projects(raw: Any) -> dict[str, dict[str, Any]]:
         last_activity = _parse_timestamp(entry.get("last_activity_at"))
         normalized["last_activity_at"] = _to_utc_iso(last_activity) if last_activity else None
         projects[cleaned_name] = normalized
+    if len(projects) > DEFAULT_MAX_PROJECTS:
+        # Oversized persisted maps (hand-edited or future versions) would
+        # otherwise shrink only one entry per recorded request.
+        kept = sorted(
+            projects.items(),
+            key=lambda item: (item[1]["tokens_saved"], item[1]["last_activity_at"] or ""),
+            reverse=True,
+        )[:DEFAULT_MAX_PROJECTS]
+        projects = dict(kept)
     return projects
 
 

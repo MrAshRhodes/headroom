@@ -172,6 +172,30 @@ def test_tracker_sanitizes_persisted_project_state(tmp_path):
     assert projects["ok"]["compression_savings_usd"] == 0.0
 
 
+def test_tracker_caps_persisted_projects_on_load(tmp_path):
+    path = tmp_path / "savings.json"
+    oversized = {
+        f"proj-{i:03d}": {"requests": 1, "tokens_saved": i}
+        for i in range(DEFAULT_MAX_PROJECTS + 10)
+    }
+    path.write_text(
+        json.dumps(
+            {
+                "schema_version": 3,
+                "lifetime": {},
+                "display_session": None,
+                "history": [],
+                "projects": oversized,
+            }
+        )
+    )
+    projects = SavingsTracker(path=str(path)).stats_preview()["projects"]
+    assert len(projects) == DEFAULT_MAX_PROJECTS
+    # Lowest tokens_saved entries are dropped, highest kept.
+    assert "proj-000" not in projects
+    assert f"proj-{DEFAULT_MAX_PROJECTS + 9:03d}" in projects
+
+
 # ---------------------------------------------------------------------------
 # End-to-end: outcome funnel -> tracker -> /stats payload
 # ---------------------------------------------------------------------------
